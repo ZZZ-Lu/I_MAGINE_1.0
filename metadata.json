@@ -1,0 +1,6 @@
+{
+  "name": "ComfyUI Zhenzhen AI Hub",
+  "description": "An interactive dashboard, workflow explorer, and API node companion for the ComfyUI Zhenzhen (贞贞的AI工坊) custom node integration package.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
