@@ -157,7 +157,7 @@ function ensureDefaultProject(): { projects: Project[]; currentId: string } {
   let projects = loadProjects();
   let currentId = loadCurrentProjectId();
   if (projects.length === 0) {
-    const def: Project = { id: 'default', name: '默认项目', createdAt: Date.now() };
+    const def: Project = { id: 'default', name: '西游_白骨_反诈', createdAt: Date.now() };
     projects = [def];
     currentId = 'default';
     saveProjects(projects);
