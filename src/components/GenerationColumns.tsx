@@ -1063,8 +1063,15 @@ export default function GenerationColumns({ onOpenSandbox, agentActionsRef }: {
 
     const doRestore = () => {
       const container = horizontalScrollRef.current;
-      if (container && scrollPositions.h > 0) {
-        container.scrollLeft = scrollPositions.h;
+      if (container) {
+        if (scrollPositions.h > 0) {
+          container.scrollLeft = scrollPositions.h;
+        } else {
+          const contentWidth = container.scrollWidth;
+          const containerWidth = container.clientWidth;
+          const scrollTo = (contentWidth - containerWidth) / 2;
+          container.scrollLeft = Math.max(0, scrollTo);
+        }
       }
       requestAnimationFrame(() => {
         for (const [colId, scrollTop] of Object.entries(scrollPositions.v)) {
