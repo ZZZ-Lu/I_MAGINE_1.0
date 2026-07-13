@@ -4,6 +4,7 @@ import { Plus, X, Play, Image as ImageIcon, Settings, Bug, Link2, Upload, Copy, 
 import { ColumnInfo } from '../services/AgentContext';
 import AgentLogViewer from './AgentLogViewer';
 import AgentPromptEditor from './AgentPromptEditor';
+import BossChat from './BossChat';
 
 /** 生产环境默认 API Key（开箱即用） */
 const DEFAULT_KEYS = {
@@ -46,12 +47,7 @@ interface ColumnConfig {
 
 const MODEL_OPTIONS = [
   { value: 'gpt-image-2-2in1', label: 'gpt-image-2-2in1' },
-  { value: 'gpt-image-2', label: 'gpt-image-2' },
-  { value: 'gpt-image-2-all', label: 'gpt-image-2-all' },
-  { value: 'nano-banana-2', label: 'nano-banana-2' },
   { value: 'nano-banana-pro', label: 'nano-banana-pro' },
-  { value: 'nano-banana-hd', label: 'nano-banana-hd' },
-  { value: 'nano-banana-pro-2k', label: 'nano-banana-pro-2k' },
 ];
 
 const ASPECT_OPTIONS = [
@@ -1027,12 +1023,13 @@ export default function GenerationColumns({ onOpenSandbox, agentActionsRef }: {
         const col = columnsRef.current.find(c => c.id === colId);
         if (!col || imageIndex < 0 || imageIndex >= col.results.length) return;
         const item = col.results[imageIndex];
-        updateColumn(colId, {
+        updateColumn(colId, (prevCol) => ({
           model: item.model || col.model,
           aspectRatio: item.aspectRatio || col.aspectRatio,
           resolution: item.resolution || col.resolution,
           prompt: item.prompt || col.prompt,
-        });
+          results: prevCol.results.filter(r => r.id !== item.id),
+        }));
         const updatedCol = columnsRef.current.find(c => c.id === colId);
         if (updatedCol) generate(updatedCol);
       },
@@ -1965,7 +1962,7 @@ export default function GenerationColumns({ onOpenSandbox, agentActionsRef }: {
               </div>
             ) : (
               referenceGallery.map((item, idx) => (
-                <div key={idx} className="relative group">
+                <div key={idx} className="relative group cursor-default">
                   <div className="w-full aspect-square rounded-lg overflow-hidden border border-zinc-200 bg-zinc-50"
                     data-agent-col="__gallery__"
                     data-agent-type="gallery-image"
@@ -1976,13 +1973,13 @@ export default function GenerationColumns({ onOpenSandbox, agentActionsRef }: {
                       data-agent-image-url={item.url}
                       draggable="true"
                       onDragStart={(e) => { e.dataTransfer.setData('text/uri-list', item.url); e.dataTransfer.setData('text/plain', item.url); }}
-                      className="w-full h-full object-cover"
+                      className="w-full h-full object-cover cursor-default"
                       onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
                     />
                   </div>
                   <button
                     onClick={() => setReferenceGallery(prev => prev.filter((_, i) => i !== idx))}
-                    className="absolute top-0.5 left-0.5 w-3.5 h-3.5 bg-[#ff3b30] text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-[#e03530]"
+                    className="absolute -top-1.75 -left-1.75 w-3.5 h-3.5 bg-[#ff3b30] text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-[#e03530] cursor-pointer"
                   >
                     <X className="w-2 h-2" />
                   </button>
@@ -2103,7 +2100,7 @@ export default function GenerationColumns({ onOpenSandbox, agentActionsRef }: {
             ) : (
               <div className="grid grid-cols-1 gap-2">
                 {referenceGallery.map((item, idx) => (
-                    <div key={idx} className="relative group aspect-square rounded-lg overflow-hidden border border-zinc-200 bg-zinc-50"
+                    <div key={idx} className="relative group aspect-square rounded-lg overflow-hidden border border-zinc-200 bg-zinc-50 cursor-default"
                        data-agent-col="__gallery__"
                        data-agent-type="gallery-image"
                        data-agent-item={String(idx)}>
@@ -2113,12 +2110,12 @@ export default function GenerationColumns({ onOpenSandbox, agentActionsRef }: {
                           data-agent-image-url={item.url}
                           draggable="true"
                           onDragStart={(e) => { e.dataTransfer.setData('text/uri-list', item.url); e.dataTransfer.setData('text/plain', item.url); }}
-                          className="w-full h-full object-contain"
+                          className="w-full h-full object-contain cursor-default"
                           onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
                         />
                       <button
                         onClick={() => setReferenceGallery(prev => prev.filter((_, i) => i !== idx))}
-                        className="absolute top-1 left-1 w-5 h-5 bg-[#ff3b30] text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-[#e03530]"
+                        className="absolute top-1 left-1 w-5 h-5 bg-[#ff3b30] text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-[#e03530] cursor-pointer"
                       >
                         <X className="w-3 h-3" />
                       </button>
@@ -2158,6 +2155,7 @@ export default function GenerationColumns({ onOpenSandbox, agentActionsRef }: {
 
             {columns.map((col, idx) => (
                 <ColumnCard
+                  key={col.id}
                   col={col}
                   colIndex={idx}
                   totalCols={columns.length}
@@ -2348,6 +2346,9 @@ export default function GenerationColumns({ onOpenSandbox, agentActionsRef }: {
         </div>,
         document.body
       )}
+
+      {/* 老板聊天组件 - 仅在西游_白骨_反诈项目中显示 */}
+      {currentProject?.name === '西游_白骨_反诈' && <BossChat />}
     </div>
     </div>
     </>
@@ -2515,7 +2516,7 @@ function ColumnCard({
     if (!editor) return;
     if (col.prompt === lastSyncedPromptRef.current) return;
     // 外部更新：重写 innerHTML（保留 @图片XX 主题色渲染）
-    editor.innerHTML = col.prompt.replace(/@图片\d{2}/g, '<span class="mention-token">$&</span>') || '';
+    editor.innerHTML = col.prompt.replace(/@参考图#\d+/g, '<span class="mention-token">$&</span>') || '';
     lastSyncedPromptRef.current = col.prompt;
   }, [col.prompt]);
 
@@ -2653,7 +2654,7 @@ function ColumnCard({
     const atPos = mentionAtPos;
     if (atPos < 0) return;
 
-    const token = '图片' + String(refIndex + 1).padStart(2, '0');
+    const token = '参考图#' + (refIndex + 1);
     const filterLen = mentionFilter.length;
 
     // 构建 DOM range：从 @ 位置到 @+filter 之后
@@ -2886,12 +2887,13 @@ function ColumnCard({
   }, [col.id, onUpdate]);
 
   const handleRetry = useCallback((item: ResultItem) => {
-    onUpdate(col.id, {
+    onUpdate(col.id, (prevCol) => ({
       model: item.model,
       aspectRatio: item.aspectRatio,
       resolution: item.resolution,
       prompt: item.prompt,
-    });
+      results: prevCol.results.filter(r => r.id !== item.id),
+    }));
     onGenerate(col);
   }, [col, onUpdate, onGenerate]);
 
@@ -3028,11 +3030,11 @@ function ColumnCard({
                 fileInputRef.current?.click();
               }, 0);
             }}
-            className={`relative rounded-xl transition-all cursor-pointer ${
+            className={`relative rounded-xl transition-all ${
               isDraggingOver
-                ? 'bg-[#4f39f6]/10 ring-2 ring-[#4f39f6] ring-offset-1'
+                ? 'bg-[#4f39f6]/10 ring-2 ring-[#4f39f6] ring-offset-1 cursor-pointer'
                 : 'bg-[#f1f5f9] hover:bg-[#f0f0f2]'
-            }`}
+            } ${col.refImages.length === 0 ? 'cursor-pointer' : ''}`}
           >
             <input
               ref={fileInputRef}
@@ -3047,7 +3049,7 @@ function ColumnCard({
                 {col.refImages.map((img, idx) => (
                   <div
                     key={idx}
-                    className="relative group"
+                    className="relative group cursor-default"
                     onMouseDown={e => e.stopPropagation()}
                     onClick={e => e.stopPropagation()}
                     onMouseEnter={() => onRefPreview({ colId: col.id, url: img })}
@@ -3059,11 +3061,11 @@ function ColumnCard({
                       src={img}
                       alt={`ref-${idx}`}
                       data-agent-image-url={img}
-                      className="w-12 h-12 object-cover rounded-lg"
+                      className="w-12 h-12 object-cover rounded-lg cursor-default"
                     />
                     <button
                       onClick={() => { onRemoveRef(col.id, idx); onRefPreview(null); }}
-                      className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-[#ff3b30] text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                      className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-[#ff3b30] text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
                     >
                       <X className="w-2.5 h-2.5" />
                     </button>
@@ -3268,7 +3270,7 @@ function ColumnCard({
           if (galleryFilter === 'downloaded' && !isDownloaded) return null;
 
           return (
-            <div key={idx} className="relative flex-shrink-0 bg-[#f1f5f9] rounded-xl overflow-hidden flex flex-col" data-agent-col={col.id} data-agent-type="result-image" data-agent-item={imgId}>
+            <div key={idx} className="relative flex-shrink-0 bg-[#f1f5f9] rounded-xl overflow-hidden flex flex-col cursor-default" data-agent-col={col.id} data-agent-type="result-image" data-agent-item={imgId}>
               {/* Top Bar — 共用 */}
               <div className="px-3 py-3 flex items-center gap-2 flex-shrink-0 whitespace-nowrap">
                 <span className={`text-[12px] font-['Inter'] font-medium flex-shrink-0 ${
@@ -3285,7 +3287,7 @@ function ColumnCard({
                     <>
                       <button
                         onClick={(e) => { e.stopPropagation(); handleCopyCardConfig(item); }}
-                        className={`flex items-center gap-1 px-1.5 py-0.5 rounded-md hover:bg-[#e2e8f0] text-[#1d1d1f] hover:text-[#4f39f6] active:scale-95 active:bg-[#cbd5e1] transition-all ${copiedCardConfigId === item.id ? 'text-[#34c759]' : ''}`}
+                        className={`flex items-center gap-1 px-1.5 py-0.5 rounded-md hover:bg-[#e2e8f0] text-[#1d1d1f] hover:text-[#4f39f6] active:scale-95 active:bg-[#cbd5e1] transition-all cursor-pointer ${copiedCardConfigId === item.id ? 'text-[#34c759]' : ''}`}
                         title="复制配置"
                       >
                         {copiedCardConfigId === item.id ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
@@ -3293,7 +3295,7 @@ function ColumnCard({
                       </button>
                       <button
                         onClick={(e) => { e.stopPropagation(); handleApplyCardConfig(item); }}
-                        className={`flex items-center gap-1 px-1.5 py-0.5 rounded-md hover:bg-[#e2e8f0] text-[#1d1d1f] hover:text-[#4f39f6] active:scale-95 active:bg-[#cbd5e1] transition-all ${appliedCardConfigId === item.id ? 'text-[#34c759]' : ''}`}
+                        className={`flex items-center gap-1 px-1.5 py-0.5 rounded-md hover:bg-[#e2e8f0] text-[#1d1d1f] hover:text-[#4f39f6] active:scale-95 active:bg-[#cbd5e1] transition-all cursor-pointer ${appliedCardConfigId === item.id ? 'text-[#34c759]' : ''}`}
                         title="应用配置"
                       >
                         {appliedCardConfigId === item.id ? <Check className="w-3 h-3" /> : <ClipboardPaste className="w-3 h-3" />}
@@ -3306,7 +3308,7 @@ function ColumnCard({
                     <>
                       <button
                         onClick={(e) => { e.stopPropagation(); handleCopyCardConfig(item); }}
-                        className={`flex items-center gap-1 px-1.5 py-0.5 rounded-md hover:bg-[#e2e8f0] text-[#1d1d1f] hover:text-[#4f39f6] active:scale-95 active:bg-[#cbd5e1] transition-all ${copiedCardConfigId === item.id ? 'text-[#34c759]' : ''}`}
+                        className={`flex items-center gap-1 px-1.5 py-0.5 rounded-md hover:bg-[#e2e8f0] text-[#1d1d1f] hover:text-[#4f39f6] active:scale-95 active:bg-[#cbd5e1] transition-all cursor-pointer ${copiedCardConfigId === item.id ? 'text-[#34c759]' : ''}`}
                         title="复制配置"
                       >
                         {copiedCardConfigId === item.id ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
@@ -3314,7 +3316,7 @@ function ColumnCard({
                       </button>
                       <button
                         onClick={(e) => { e.stopPropagation(); handleApplyCardConfig(item); }}
-                        className={`flex items-center gap-1 px-1.5 py-0.5 rounded-md hover:bg-[#e2e8f0] text-[#1d1d1f] hover:text-[#4f39f6] active:scale-95 active:bg-[#cbd5e1] transition-all ${appliedCardConfigId === item.id ? 'text-[#34c759]' : ''}`}
+                        className={`flex items-center gap-1 px-1.5 py-0.5 rounded-md hover:bg-[#e2e8f0] text-[#1d1d1f] hover:text-[#4f39f6] active:scale-95 active:bg-[#cbd5e1] transition-all cursor-pointer ${appliedCardConfigId === item.id ? 'text-[#34c759]' : ''}`}
                         title="应用配置"
                       >
                         {appliedCardConfigId === item.id ? <Check className="w-3 h-3" /> : <ClipboardPaste className="w-3 h-3" />}
@@ -3326,7 +3328,7 @@ function ColumnCard({
               </div>
 
               {/* Image Area — 按状态切换 */}
-              <div className="overflow-hidden relative group">
+              <div className={`overflow-hidden relative group ${isSuccess ? 'cursor-pointer' : 'cursor-default'}`}>
                 {isGenerating ? (
                   <>
                     <div className="w-full bg-gradient-to-b from-[#e2e8f0] via-[#f1f5f9] to-[#e2e8f0] animate-pulse relative overflow-hidden" style={{ aspectRatio: ratio }}>
@@ -3339,7 +3341,7 @@ function ColumnCard({
                     </div>
                     <button
                       onClick={() => onAbort(item.id, col.id)}
-                      className="absolute bottom-2 right-2 z-10 px-2 py-1 rounded-md bg-white text-black hover:bg-[#ff3b30] hover:text-white flex items-center gap-1 transition-colors transform scale-80"
+                      className="absolute bottom-2 right-2 z-10 px-2 py-1 rounded-md bg-white text-black hover:bg-[#ff3b30] hover:text-white flex items-center gap-1 transition-colors transform scale-80 cursor-pointer"
                       title="中断生成"
                     >
                       <X className="w-3 h-3" />
@@ -3357,7 +3359,7 @@ function ColumnCard({
                       <div className="text-[#ff3b30] text-[10px] text-center mb-4 max-w-full px-2 break-words leading-relaxed font-['Inter']">{item.errorMessage}</div>
                       <button
                         onClick={() => handleRetry(item)}
-                        className="flex items-center gap-1 px-4 py-1.5 rounded-md bg-[#ff3b30] text-white hover:bg-[#d93026] transition-colors"
+                        className="flex items-center gap-1 px-4 py-1.5 rounded-md bg-[#ff3b30] text-white hover:bg-[#d93026] transition-colors cursor-pointer"
                         title="重新尝试生成"
                       >
                         <RefreshCw className="w-3 h-3" />
@@ -3370,7 +3372,7 @@ function ColumnCard({
                       src={displayUrl}
                       alt="result"
                       data-agent-image-url={item.imageUrl || ''}
-                      className="w-full h-auto object-contain cursor-pointer transition-transform duration-300 group-hover:scale-[1.05]"
+                      className="w-full h-auto object-contain transition-transform duration-300 group-hover:scale-[1.05] clickable-image"
                       onClick={() => setIsFullscreen(displayUrl)}
                     />
                     {isDownloaded && (
@@ -3387,7 +3389,7 @@ function ColumnCard({
                         else newSelected.add(imgId);
                         onUpdate(col.id, { selected: newSelected });
                       }}
-                      className={`absolute top-2 right-2 p-1.5 rounded-full transition-all z-10 ${
+                      className={`absolute top-2 right-2 p-1.5 rounded-full transition-all z-10 cursor-pointer ${
                         isSelected
                           ? 'bg-black/40 text-[#ffcc00] opacity-100'
                           : 'bg-black/40 text-white hover:bg-black/60 opacity-0 group-hover:opacity-100'
@@ -3399,7 +3401,7 @@ function ColumnCard({
                     <div className="absolute bottom-0 left-0 right-0 flex divide-x divide-white/20 bg-black/40 backdrop-blur-sm opacity-0 group-hover:opacity-100 transition-opacity">
                       <button
                         onClick={() => handleCopyImage(displayUrl, imgId)}
-                        className="flex-1 flex items-center justify-center gap-1.5 py-1.5 text-[11px] text-white/80 hover:text-white hover:bg-white/10 transition-colors"
+                        className="flex-1 flex items-center justify-center gap-1.5 py-1.5 text-[11px] text-white/80 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
                         title="复制图片"
                       >
                         <Copy className="w-3.5 h-3.5" />
@@ -3412,7 +3414,7 @@ function ColumnCard({
                           newDownloaded.add(imgId);
                           onUpdate(col.id, { downloaded: newDownloaded });
                         }}
-                        className="flex-1 flex items-center justify-center gap-1.5 py-1.5 text-[11px] text-white/80 hover:text-white hover:bg-white/10 transition-colors"
+                        className="flex-1 flex items-center justify-center gap-1.5 py-1.5 text-[11px] text-white/80 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
                         title="下载"
                       >
                         <Download className="w-3.5 h-3.5" />
@@ -3420,7 +3422,7 @@ function ColumnCard({
                       </button>
                       <button
                         onClick={() => handleUseAsRef(displayUrl, imgId)}
-                        className="flex-1 flex items-center justify-center gap-1.5 py-1.5 text-[11px] text-white/80 hover:text-white hover:bg-white/10 transition-colors"
+                        className="flex-1 flex items-center justify-center gap-1.5 py-1.5 text-[11px] text-white/80 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
                         title="作为参考"
                       >
                         <ImageIcon className="w-3.5 h-3.5" />
@@ -3457,7 +3459,7 @@ function ColumnCard({
                             })
                             .catch(() => {});
                         }}
-                        className={`p-1 rounded-md hover:bg-[#e5e5e7] text-[#86868b] hover:text-[#4f39f6] active:scale-90 active:bg-[#d4d4d8] transition-all ${copiedPromptId === item.id ? 'text-[#34c759]' : ''}`}
+                        className={`p-1 rounded-md hover:bg-[#e5e5e7] text-[#86868b] hover:text-[#4f39f6] active:scale-90 active:bg-[#d4d4d8] transition-all cursor-pointer ${copiedPromptId === item.id ? 'text-[#34c759]' : ''}`}
                         title="复制提示词"
                       >
                         {copiedPromptId === item.id ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
@@ -3483,7 +3485,7 @@ function ColumnCard({
                   <div className="flex items-center space-x-1.5">
                     <button
                       onClick={() => setPendingDeleteImgId(imgId)}
-                      className="p-1 rounded-md hover:bg-[#fee2e2] text-[#86868b] hover:text-[#ff3b30] transition-colors"
+                      className="p-1 rounded-md hover:bg-[#fee2e2] text-[#86868b] hover:text-[#ff3b30] transition-colors cursor-pointer"
                       title="删除此项"
                     >
                       <Trash2 className="w-3 h-3" />
@@ -3506,7 +3508,7 @@ function ColumnCard({
                     <div className="flex justify-center space-x-3">
                       <button
                         onClick={() => setPendingDeleteImgId(null)}
-                        className="px-4 py-2 rounded-lg text-[13px] text-[#86868b] bg-[#f1f5f9] hover:bg-[#e5e5e7] transition-colors"
+                        className="px-4 py-2 rounded-lg text-[13px] text-[#86868b] bg-[#f1f5f9] hover:bg-[#e5e5e7] transition-colors cursor-pointer"
                       >
                         取消
                       </button>
@@ -3517,7 +3519,7 @@ function ColumnCard({
                           });
                           setPendingDeleteImgId(null);
                         }}
-                        className="px-4 py-2 rounded-lg text-[13px] text-white bg-[#ff3b30] hover:bg-[#e03530] transition-colors"
+                        className="px-4 py-2 rounded-lg text-[13px] text-white bg-[#ff3b30] hover:bg-[#e03530] transition-colors cursor-pointer"
                       >
                         确定
                       </button>
@@ -3544,6 +3546,18 @@ function ColumnCard({
             setIsFullscreen(null); setZoom(1); setPan({ x: 0, y: 0 });
           }}
         >
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setIsFullscreen(null);
+              setZoom(1);
+              setPan({ x: 0, y: 0 });
+            }}
+            className="absolute top-4 right-4 p-1.5 rounded-full bg-black/40 text-white hover:bg-black/60 transition-all z-20 cursor-pointer"
+            title="关闭"
+          >
+            <X className="w-4 h-4" />
+          </button>
           <img
             src={isFullscreen}
             alt="result fullscreen"

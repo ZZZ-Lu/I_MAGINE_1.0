@@ -6,6 +6,9 @@ import {
   runPromptArchitect,
   runResultReviewer,
   runVisualAnalyst,
+  agentDbGet,
+  agentDbPut,
+  loadSavedPrompts,
   AgentMessage,
   AgentPlan,
   AgentToolCall,
@@ -14,7 +17,7 @@ import {
   VisualAnalysis,
 } from '../services/agentService';
 import { useAgentActions } from '../services/AgentContext';
-import { addLogRound } from '../services/agentLogStore';
+import { addLogRound, SubAgentRecord } from '../services/agentLogStore';
 
 /** IndexedDB 存储，用于缓存压缩后的图片 data URL */
 const DB_NAME = 'agent-image-cache';
@@ -132,10 +135,8 @@ export default function FloatingAgentInput() {
   const [position, setPosition] = useState({ x: 0, y: 0 });
   const [openPosition, setOpenPosition] = useState({ x: 0, y: 0 });
   const [apiKey, setApiKey] = useState(() => localStorage.getItem('agent_qwen_api_key') || '');
-  const [messages, setMessages] = useState<AgentMessage[]>(() => {
-    try { return JSON.parse(localStorage.getItem('agent_messages') || '[]'); }
-    catch { return []; }
-  });
+  const [messages, setMessages] = useState<AgentMessage[]>([]);
+  const [messagesLoaded, setMessagesLoaded] = useState(false);
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [expandedTools, setExpandedTools] = useState<Set<number>>(new Set());
@@ -150,8 +151,25 @@ export default function FloatingAgentInput() {
   const stopControllerRef = useRef<AbortController | null>(null);
   const toolImageRef = useRef<string | undefined>(undefined);
   const goalRef = useRef<string>('');
+  const subAgentOutputsRef = useRef<SubAgentRecord[]>([]);
+  const statusMessagesRef = useRef<string[]>([]);
+  const dbInitRef = useRef(false);
 
   const hasReplies = messages.length > 0 || isLoading;
+
+  // 从 IndexedDB 加载消息和已保存的提示词
+  useEffect(() => {
+    if (dbInitRef.current) return;
+    dbInitRef.current = true;
+    (async () => {
+      await loadSavedPrompts();
+      const saved = await agentDbGet('messages', 'agent_messages');
+      if (saved && Array.isArray(saved) && saved.length > 0) {
+        setMessages(saved as AgentMessage[]);
+      }
+      setMessagesLoaded(true);
+    })();
+  }, []);
 
   const buildPageSnapshot = useCallback((focusNote?: string) => {
     const cols = actions.getColumns();
@@ -231,6 +249,7 @@ export default function FloatingAgentInput() {
     let plan: AgentPlan | undefined;
     let visualAnalysis: VisualAnalysis | undefined;
     let promptDraft: PromptDraft | undefined;
+    const subOutputs: SubAgentRecord[] = [];
 
     // 有图片时先分析图片（优先检查缓存），再意图规划
     const hasImages = !!(imageUrl || (imageUrls && imageUrls.length > 0));
@@ -244,6 +263,7 @@ export default function FloatingAgentInput() {
         onStatus?.('我先看下这张图…');
         try {
           visualAnalysis = await runVisualAnalyst(apiKeyValue, text, pageSnapshot, imageUrl, imageUrls, signal);
+          subOutputs.push({ name: 'VisualAnalyst', prompt: '分析图片内容', output: JSON.stringify(visualAnalysis, null, 2) });
           // 分析成功后存入缓存
           if (visualAnalysis && singleUrl) {
             setCachedVisualAnalysis(singleUrl, visualAnalysis);
@@ -262,6 +282,7 @@ export default function FloatingAgentInput() {
         ? `[图片分析]\n${JSON.stringify(visualAnalysis, null, 2)}\n\n${pageSnapshot}`
         : pageSnapshot;
       plan = await runIntentPlanner(apiKeyValue, text, planContext, signal);
+      subOutputs.push({ name: 'IntentPlanner', prompt: '判断用户意图', output: JSON.stringify(plan, null, 2) });
     } catch (err: any) {
       errors.push(`IntentPlanner: ${err.message}`);
     }
@@ -282,6 +303,7 @@ export default function FloatingAgentInput() {
           onStatus?.('我来看看这张图…');
           try {
             visualAnalysis = await runVisualAnalyst(apiKeyValue, text, pageSnapshot, imageUrl, imageUrls, signal);
+            subOutputs.push({ name: 'VisualAnalyst', prompt: '分析图片内容', output: JSON.stringify(visualAnalysis, null, 2) });
             if (visualAnalysis && singleUrl) {
               setCachedVisualAnalysis(singleUrl, visualAnalysis);
             }
@@ -302,10 +324,13 @@ export default function FloatingAgentInput() {
       onStatus?.('我想想提示词怎么优化…');
       try {
         promptDraft = await runPromptArchitect(apiKeyValue, text, pageSnapshot, plan, visualAnalysis, signal);
+        subOutputs.push({ name: 'PromptArchitect', prompt: '优化生图提示词', output: JSON.stringify(promptDraft, null, 2) });
       } catch (err: any) {
         errors.push(`PromptArchitect: ${err.message}`);
       }
     }
+
+    subAgentOutputsRef.current = subOutputs;
 
     return {
       pageSnapshot,
@@ -356,10 +381,10 @@ export default function FloatingAgentInput() {
     });
   }, []);
 
-  // 自动滚动到最新消息
+  // 自动滚动到最新消息（包括收起后再展开时）
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, isLoading]);
+  }, [messages, isLoading, isOpen]);
 
   const handleMouseMove = useCallback((e: MouseEvent) => {
     setPosition({ x: e.clientX + 16, y: e.clientY + 16 });
@@ -375,7 +400,7 @@ export default function FloatingAgentInput() {
     setIsOpen(true);
 
     if (!isCtrlPressed) {
-      setMessages([]);
+      // 保留对话历史，只重置聚焦上下文
       setFocusedElements(new Set());
       setFocusContexts([]);
       focusedElementRef.current = null;
@@ -470,10 +495,9 @@ export default function FloatingAgentInput() {
 
   const handleClose = useCallback(() => {
     setIsOpen(false);
-    setMessages([]);
+    // 不清空 messages，保留对话历史以便下次展开时显示
     setFocusContexts([]);
     goalRef.current = '';
-    try { localStorage.removeItem('agent_messages'); } catch {}
     setFocusedElements(new Set());
     focusedElementRef.current = null;
   }, []);
@@ -512,13 +536,31 @@ export default function FloatingAgentInput() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [isOpen, handleClose]);
 
-  // 自动保存消息到 localStorage（最多保留 50 条）
+  // 自动保存消息到 IndexedDB（最多保留 50 条）
   useEffect(() => {
-    try {
-      const toSave = messages.length > 50 ? messages.slice(-50) : messages;
-      localStorage.setItem('agent_messages', JSON.stringify(toSave));
-    } catch { /* localStorage 满时静默失败 */ }
-  }, [messages]);
+    if (!messagesLoaded) return;
+    const toSave = messages.length > 50 ? messages.slice(-50) : messages;
+    agentDbPut('messages', 'agent_messages', toSave);
+  }, [messages, messagesLoaded]);
+
+  // 首次打开 agent 且无对话历史时，发送欢迎消息
+  useEffect(() => {
+    if (!isOpen) return;
+    if (!messagesLoaded) return;
+    if (messages.length > 0) return;
+    // 用 IndexedDB 标记是否已发送过欢迎消息
+    (async () => {
+      const welcomed = await agentDbGet('flags', 'agent_welcomed');
+      if (welcomed) return;
+      await agentDbPut('flags', 'agent_welcomed', '1');
+      setMessages([
+        {
+          role: 'assistant',
+          content: '你好，我是你的生图 agent，我可以帮你找参考、生图、或者讨论，有什么想法都可以和我说',
+        },
+      ]);
+    })();
+  }, [isOpen, messagesLoaded]);
 
   /** 执行工具调用 */
   const executeToolCall = useCallback(async (toolCall: AgentToolCall, msgs: AgentMessage[]): Promise<string> => {
@@ -894,7 +936,7 @@ export default function FloatingAgentInput() {
               'Content-Type': 'application/json',
               'x-bocha-key': bochaKey,
             },
-            body: JSON.stringify({ query, count, answer: false, stream: false }),
+            body: JSON.stringify({ query, count, answer: false, stream: false, include: 'douyin.com' }),
           });
           if (!res.ok) {
             const errText = await res.text();
@@ -1200,6 +1242,7 @@ export default function FloatingAgentInput() {
     stopControllerRef.current = controller;
 
     try {
+      statusMessagesRef.current = [];
       const prepared = await prepareSubAgentContext(
         currentKey,
         text,
@@ -1207,15 +1250,19 @@ export default function FloatingAgentInput() {
         displayUserMsg.imageUrl,
         displayUserMsg.imageUrls,
         controller.signal,
-        (status) => setMessages(prev => {
-          const next = [...prev];
-          if (next.length > 0 && next[next.length - 1].role === 'assistant' && next[next.length - 1].content === '') {
-            next[next.length - 1] = { ...next[next.length - 1], content: status };
-          } else {
-            next.push({ role: 'assistant', content: status });
-          }
-          return next;
-        }),
+        (status) => {
+          // 同步保存到 ref，确保后续不会被清除
+          statusMessagesRef.current.push(status);
+          setMessages(prev => {
+            const next = [...prev];
+            if (next.length > 0 && next[next.length - 1].role === 'assistant' && next[next.length - 1].content === '') {
+              next[next.length - 1] = { ...next[next.length - 1], content: status };
+            } else {
+              next.push({ role: 'assistant', content: status });
+            }
+            return next;
+          });
+        },
       );
       const enrichedUserMsg: AgentMessage = {
         ...displayUserMsg,
@@ -1229,7 +1276,9 @@ export default function FloatingAgentInput() {
       // 保存任务目标，每轮循环注入提醒
       goalRef.current = prepared.plan?.goal || '';
 
-      let currentMsgs = [...messages, enrichedUserMsg];
+      // 把子 agent 阶段的状态消息保留在用户消息之后，主 agent 回复之前
+       const statusMsgs: AgentMessage[] = statusMessagesRef.current.map(s => ({ role: 'assistant' as const, content: s }));
+       let currentMsgs = [...messages, enrichedUserMsg, ...statusMsgs];
       let rounds = 0;
       let hasMoreTools = true;
       let stopped = false;
@@ -1262,8 +1311,9 @@ export default function FloatingAgentInput() {
             controller.signal,
           );
           currentMsgs = roundMsgs;
-          // 剥离 tool 消息中的 imageUrl，避免 data URL 在对话中累积撑爆 6MB 限制
-          currentMsgs = currentMsgs.map(m => m.role === 'tool' ? { ...m, imageUrl: undefined } : m);
+          // 剥离所有消息中的 imageUrl，避免 data URL 在对话中累积撑爆 6MB 限制
+          // 后续轮次不需要再传之前的图片，已通过第一轮传入的上下文理解
+          currentMsgs = currentMsgs.map(m => ({ ...m, imageUrl: undefined, imageUrls: undefined }));
           setMessages([...currentMsgs]);
           hasMoreTools = hasToolCalls;
           if (controller.signal.aborted) { stopped = true; break; }
@@ -1297,7 +1347,8 @@ export default function FloatingAgentInput() {
         };
         currentMsgs = [...currentMsgs, stopMsg];
         setMessages(currentMsgs);
-        addLogRound({ userInput: text + ' [用户停止]', messages: currentMsgs });
+        const sao = [...subAgentOutputsRef.current];
+        addLogRound({ userInput: text + ' [用户停止]', messages: currentMsgs, subAgentOutputs: sao });
         return;
       }
 
@@ -1309,6 +1360,7 @@ export default function FloatingAgentInput() {
       if (toolResults) {
         try {
           const review = await runResultReviewer(currentKey, text, buildPageSnapshot(contextMsg), toolResults);
+          subAgentOutputsRef.current = [...subAgentOutputsRef.current, { name: 'ResultReviewer', prompt: '复核生成结果', output: JSON.stringify(review, null, 2) }];
           if (!review.isComplete && review.nextActions.length > 0) {
             currentMsgs = [
               ...currentMsgs,
@@ -1349,18 +1401,21 @@ export default function FloatingAgentInput() {
       }
 
       setMessages(currentMsgs);
-      addLogRound({ userInput: text, messages: currentMsgs });
+      const sao = [...subAgentOutputsRef.current];
+      addLogRound({ userInput: text, messages: currentMsgs, subAgentOutputs: sao });
     } catch (err: any) {
       // 用户主动停止的 AbortError 不显示错误
       if (err.name === 'AbortError') {
         const stopMsgs = [...newMsgs, { role: 'assistant' as const, content: '\n\n⏹ [操作已停止]' }];
         setMessages(stopMsgs);
-        addLogRound({ userInput: text + ' [用户停止]', messages: stopMsgs });
+        const sao2 = [...subAgentOutputsRef.current];
+        addLogRound({ userInput: text + ' [用户停止]', messages: stopMsgs, subAgentOutputs: sao2 });
         return;
       }
       const errorMsgs = [...newMsgs, { role: 'assistant' as const, content: `❌ 出错: ${err.message}` }];
       setMessages(prev => [...prev, errorMsgs[errorMsgs.length - 1]]);
-      addLogRound({ userInput: text, messages: errorMsgs });
+      const sao3 = [...subAgentOutputsRef.current];
+      addLogRound({ userInput: text, messages: errorMsgs, subAgentOutputs: sao3 });
     } finally {
       setIsLoading(false);
       stopControllerRef.current = null;
@@ -1400,11 +1455,18 @@ export default function FloatingAgentInput() {
         className="fixed pointer-events-none z-[10000] transition-opacity duration-200"
         style={{ left: position.x, top: position.y, opacity: isOpen ? 0 : 1 }}
       >
-        <div className="bg-black/80 backdrop-blur-sm text-white text-xs px-3 py-1.5 rounded-2xl shadow-lg border border-[#4f39f6]/40 flex items-center gap-2">
-          <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
-          <span className="font-semibold">Agent</span>
-          <span className="text-white/50">右键呼出</span>
-        </div>
+        {isLoading ? (
+          <div className="bg-[#4f39f6]/90 backdrop-blur-md text-white text-xs px-3 py-1.5 rounded-2xl shadow-lg border border-[#4f39f6] flex items-center gap-2">
+            <div className="w-2 h-2 rounded-full bg-white animate-ping" />
+            <span className="font-semibold">思考中...</span>
+          </div>
+        ) : (
+          <div className="bg-black/80 backdrop-blur-sm text-white text-xs px-3 py-1.5 rounded-2xl shadow-lg border border-[#4f39f6]/40 flex items-center gap-2">
+            <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+            <span className="font-semibold">Agent</span>
+            <span className="text-white/50">右键呼出</span>
+          </div>
+        )}
       </div>
 
       {/* 面板：只有输入框 / 有回复时展开 */}

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { X, Trash2, ChevronDown, ChevronRight, User, Bot, Wrench } from 'lucide-react';
-import { getLogs, clearLogs, subscribeLogs, LogRound } from '../services/agentLogStore';
+import { X, Trash2, ChevronDown, ChevronRight, User, Bot, Wrench, Brain, Eye, FileText, ClipboardCheck } from 'lucide-react';
+import { getLogs, clearLogs, subscribeLogs, LogRound, SubAgentRecord } from '../services/agentLogStore';
 import type { AgentMessage } from '../services/agentService';
 
 export default function AgentLogViewer({ onClose }: { onClose: () => void }) {
@@ -45,6 +45,26 @@ export default function AgentLogViewer({ onClose }: { onClose: () => void }) {
       case 'assistant': return 'border-l-green-400';
       case 'tool': return 'border-l-amber-400';
       default: return 'border-l-zinc-500';
+    }
+  };
+
+  const subAgentIcon = (name: string) => {
+    switch (name) {
+      case 'IntentPlanner': return <Brain className="w-3 h-3 text-purple-500" />;
+      case 'VisualAnalyst': return <Eye className="w-3 h-3 text-sky-500" />;
+      case 'PromptArchitect': return <FileText className="w-3 h-3 text-orange-500" />;
+      case 'ResultReviewer': return <ClipboardCheck className="w-3 h-3 text-emerald-500" />;
+      default: return <Bot className="w-3 h-3 text-zinc-500" />;
+    }
+  };
+
+  const subAgentColor = (name: string) => {
+    switch (name) {
+      case 'IntentPlanner': return 'border-l-purple-400 bg-purple-50/50';
+      case 'VisualAnalyst': return 'border-l-sky-400 bg-sky-50/50';
+      case 'PromptArchitect': return 'border-l-orange-400 bg-orange-50/50';
+      case 'ResultReviewer': return 'border-l-emerald-400 bg-emerald-50/50';
+      default: return 'border-l-zinc-400 bg-zinc-50/50';
     }
   };
 
@@ -106,6 +126,11 @@ export default function AgentLogViewer({ onClose }: { onClose: () => void }) {
                     <span className="flex-1 text-[12px] text-[#1d1d1f] truncate font-medium">
                       {log.userInput}
                     </span>
+                    {log.subAgentOutputs && log.subAgentOutputs.length > 0 && (
+                      <span className="text-[9px] px-1.5 py-0.5 rounded bg-purple-100 text-purple-700 flex-shrink-0 mr-2">
+                        {log.subAgentOutputs.length} 子Agent
+                      </span>
+                    )}
                     <span className="text-[10px] text-[#a1a1a6] flex-shrink-0">
                       {new Date(log.timestamp).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
                     </span>
@@ -114,6 +139,32 @@ export default function AgentLogViewer({ onClose }: { onClose: () => void }) {
                   {/* Expanded Messages */}
                   {isExpanded && (
                     <div className="divide-y divide-[#f0f0f2]">
+                      {/* 子 Agent 输出 */}
+                      {log.subAgentOutputs && log.subAgentOutputs.length > 0 && (
+                        <div className="px-3 py-2 bg-[#fafafa] border-b border-[#f0f0f2]">
+                          <div className="text-[10px] font-semibold text-[#a1a1a6] uppercase mb-2">
+                            子 Agent 分析
+                          </div>
+                          <div className="space-y-1.5">
+                            {log.subAgentOutputs.map((sa, i) => (
+                              <div key={i} className={`pl-3 border-l-2 rounded ${subAgentColor(sa.name)}`}>
+                                <div className="px-2.5 py-2">
+                                  <div className="flex items-center gap-1.5 mb-0.5">
+                                    {subAgentIcon(sa.name)}
+                                    <span className="text-[10px] font-semibold text-[#52525b]">
+                                      {sa.name}
+                                    </span>
+                                    <span className="text-[9px] text-[#a1a1a6]">{sa.prompt}</span>
+                                  </div>
+                                  <pre className="text-[11px] text-[#3f3f46] whitespace-pre-wrap leading-relaxed font-mono mt-1">
+                                    {sa.output.length > 500 ? sa.output.slice(0, 500) + '\n...' : sa.output}
+                                  </pre>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                       {log.messages.map((msg, idx) => (
                         <div key={idx} className={`pl-3 border-l-2 ${roleColor(msg.role)}`}>
                           <div className="px-3 py-2">

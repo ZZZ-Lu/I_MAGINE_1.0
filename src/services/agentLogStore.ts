@@ -1,10 +1,17 @@
 import { AgentMessage } from './agentService';
 
+export interface SubAgentRecord {
+  name: string;
+  prompt: string;
+  output: string;
+}
+
 export interface LogRound {
   id: string;
   timestamp: number;
   userInput: string;
   messages: AgentMessage[];
+  subAgentOutputs?: SubAgentRecord[];
 }
 
 type Listener = () => void;
