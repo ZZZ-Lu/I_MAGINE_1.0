@@ -858,10 +858,10 @@ export default function Playground({ onBack }: { onBack?: () => void }) {
             <div className="space-y-1.5">
               <span className="text-[10px] font-mono text-zinc-500 uppercase">Model</span>
               <select value={model} onChange={(e) => setModel(e.target.value)} className="w-full bg-zinc-950 border border-zinc-800 p-2.5 rounded-lg text-xs font-mono">
+                <option value="seedream-4">即梦4</option>
                 <option value="nano-banana-pro">nano-banana-pro</option>
                 <option value="nano-banana-hd">nano-banana-hd</option>
                 <option value="nano-banana-pro-2k">nano-banana-pro-2k</option>
-                <option value="seedream-4">即梦4</option>
                 <option value="gpt-image-2">gpt-image-2</option>
                 <option value="gpt-image-2-all">gpt-image-2-all</option>
               </select>

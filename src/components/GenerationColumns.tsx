@@ -48,9 +48,9 @@ interface ColumnConfig {
 }
 
 const MODEL_OPTIONS = [
+  { value: 'seedream-4', label: '即梦4' },
   { value: 'nano-banana-pro', label: 'nano-banana-pro' },
   { value: 'gpt-image-2-2in1', label: 'gpt-image-2-2in1' },
-  { value: 'seedream-4', label: '即梦4' },
 ];
 
 const ASPECT_OPTIONS = [
@@ -203,7 +203,7 @@ function createEmptyColumn(index: number): ColumnConfig {
   return {
     id: `col_${Date.now()}_${index}`,
     name: `生图列_${String(index + 1).padStart(2, '0')}`,
-    model: 'nano-banana-pro',
+    model: 'seedream-4',
     aspectRatio: '9:16',
     resolution: '1k',
     quality: 'auto',

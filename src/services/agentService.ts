@@ -142,6 +142,28 @@ export const AGENT_TOOLS: AgentToolParam[] = [
   {
     type: 'function',
     function: {
+      name: 'generate_image',
+      description: '在当前选中的生图列中执行图片生成',
+      parameters: {
+        type: 'object',
+        properties: {
+          columnIndex: {
+            type: 'number',
+            description: '生图列的索引（从0开始），-1表示所有列',
+            default: 0,
+          },
+          prompt: {
+            type: 'string',
+            description: '要覆盖的提示词，为空则使用该列已有的提示词',
+          },
+        },
+        required: [],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'create_column',
       description: '新建一个生图列（在末尾追加）',
       parameters: {
@@ -153,8 +175,8 @@ export const AGENT_TOOLS: AgentToolParam[] = [
           },
           model: {
             type: 'string',
-            description: '模型名称，可选: nano-banana-pro, gpt-image-2-2in1, seedream-4',
-            default: 'nano-banana-pro',
+            description: '模型名称，可选: seedream-4, nano-banana-pro, gpt-image-2-2in1',
+            default: 'seedream-4',
           },
           aspectRatio: {
             type: 'string',
@@ -169,28 +191,6 @@ export const AGENT_TOOLS: AgentToolParam[] = [
           prompt: {
             type: 'string',
             description: '生图提示词（使用中文描述，清晰表达图片内容）',
-          },
-        },
-        required: [],
-      },
-    },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'generate_image',
-      description: '在当前选中的生图列中执行图片生成',
-      parameters: {
-        type: 'object',
-        properties: {
-          columnIndex: {
-            type: 'number',
-            description: '生图列的索引（从0开始），-1表示所有列',
-            default: 0,
-          },
-          prompt: {
-            type: 'string',
-            description: '要覆盖的提示词，为空则使用该列已有的提示词',
           },
         },
         required: [],
@@ -249,7 +249,7 @@ export const AGENT_TOOLS: AgentToolParam[] = [
           },
           model: {
             type: 'string',
-            description: '模型名称，可选: nano-banana-pro, gpt-image-2-2in1, seedream-4',
+            description: '模型名称，可选: seedream-4, nano-banana-pro, gpt-image-2-2in1',
           },
         },
         required: ['columnIndex', 'model'],
