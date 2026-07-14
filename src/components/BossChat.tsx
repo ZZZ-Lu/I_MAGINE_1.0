@@ -40,8 +40,7 @@ const BOSS_SYSTEM_PROMPT = `角色
 最终的目标
 用户制作出了符合你要求的"孙悟空"，"唐僧"，和"白骨精"的人设图
 
-要求
-每个角色至少提两次修改建议`;
+`;
 
 function openDB(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -187,6 +186,7 @@ const DEFAULT_OPENING: { content: string }[] = [
   { content: '孙悟空，唐僧，白骨精' },
   { content: '就用你那个 IMAGINE，不会用，就点击 鼠标右键 让 agent 帮你生' },
   { content: '你就说老板让你生个憨厚老实的唐僧，一看就容易被骗，无厘头的那种感觉' },
+  { content: '生好了把图拖到下面的输入框发我看' },
 ];
 
 export default function BossChat() {

@@ -5,6 +5,8 @@ import { ColumnInfo } from '../services/AgentContext';
 import AgentLogViewer from './AgentLogViewer';
 import AgentPromptEditor from './AgentPromptEditor';
 import BossChat from './BossChat';
+import { runAsyncImageGeneration, generateWhiteImageBlob, receiveImage } from '../services/imageGenerationService';
+import type { ReceiveImageResult } from '../services/imageGenerationService';
 
 /** 生产环境默认 API Key（开箱即用） */
 const DEFAULT_KEYS = {
@@ -46,8 +48,9 @@ interface ColumnConfig {
 }
 
 const MODEL_OPTIONS = [
-  { value: 'gpt-image-2-2in1', label: 'gpt-image-2-2in1' },
   { value: 'nano-banana-pro', label: 'nano-banana-pro' },
+  { value: 'gpt-image-2-2in1', label: 'gpt-image-2-2in1' },
+  { value: 'seedream-4', label: '即梦4' },
 ];
 
 const ASPECT_OPTIONS = [
@@ -200,7 +203,7 @@ function createEmptyColumn(index: number): ColumnConfig {
   return {
     id: `col_${Date.now()}_${index}`,
     name: `生图列_${String(index + 1).padStart(2, '0')}`,
-    model: 'gpt-image-2-2in1',
+    model: 'nano-banana-pro',
     aspectRatio: '9:16',
     resolution: '1k',
     quality: 'auto',
@@ -457,7 +460,12 @@ function formatTimeAgo(ts: number): string {
 async function saveImageBlob(url: string, presetId?: string): Promise<string> {
   const imageId = presetId || `img_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   try {
-    const res = await fetch(url);
+    let res: Response;
+    if (url.startsWith('http://') || url.startsWith('https://')) {
+      res = await fetch(`/api/proxy-image?url=${encodeURIComponent(url)}`);
+    } else {
+      res = await fetch(url);
+    }
     const blob = await res.blob();
     const db = await openDB();
     const tx = db.transaction(IMAGES_STORE, 'readwrite');
@@ -472,6 +480,48 @@ async function saveImageBlob(url: string, presetId?: string): Promise<string> {
     if (presetId) throw e; // 传了 presetId 就抛错，由外层 catch 处理
     return `err_${Date.now()}`;
   }
+}
+
+/** 直接存 Blob 到 IndexedDB（不 fetch），用于后台持久化 */
+async function saveBlobToDB(id: string, blob: Blob): Promise<void> {
+  try {
+    const db = await openDB();
+    const tx = db.transaction(IMAGES_STORE, 'readwrite');
+    const store = tx.objectStore(IMAGES_STORE);
+    store.put({ id, blob });
+    await new Promise<void>((resolve, reject) => {
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch { /* 后台静默失败，不影响主流程 */ }
+}
+
+/**
+ * 收图流程：主动 Fetch Blob 到内存 → URL.createObjectURL 瞬间出图。
+ * 消除浏览器渐进加载 CDN URL 产生的"从上往下刷"和高度抖动。
+ */
+function receiveAndDisplayImage(
+  originalUrl: string,
+  imageId: string,
+  apiKey: string,
+  setImageUrls: React.Dispatch<React.SetStateAction<Record<string, string>>>
+): void {
+  // 主动下载 Blob（不依赖浏览器渐进加载 CDN URL）
+  receiveImage(originalUrl, apiKey)
+    .then(({ thumbnailUrl, blobUrl, blob }: ReceiveImageResult) => {
+      // 缩略图先出（小体积，瞬间渲染完整画面）
+      setImageUrls(prev => ({ ...prev, [imageId]: thumbnailUrl }));
+      // 全图 Blob URL 替换（内存中已就绪，createObjectURL 瞬间显示）
+      setTimeout(() => {
+        setImageUrls(prev => ({ ...prev, [imageId]: blobUrl }));
+      }, 100);
+      // 后台存 IndexedDB（不阻塞渲染）
+      saveBlobToDB(imageId, blob).catch(() => {});
+    })
+    .catch(() => {
+      // 下载失败：降级使用 CDN URL
+      setImageUrls(prev => ({ ...prev, [imageId]: originalUrl }));
+    });
 }
 
 /** 从 images store 读取 Blob 并创建 objectURL 的 Map */
@@ -526,8 +576,9 @@ function formatDuration(seconds: number): string {
   return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
 }
 
-export default function GenerationColumns({ onOpenSandbox, agentActionsRef }: {
+export default function GenerationColumns({ onOpenSandbox, onOpenAnyApi, agentActionsRef }: {
   onOpenSandbox: () => void;
+  onOpenAnyApi: () => void;
   agentActionsRef: React.MutableRefObject<{
     addColumn: () => void;
     removeColumn: (id: string) => void;
@@ -1470,9 +1521,7 @@ export default function GenerationColumns({ onOpenSandbox, agentActionsRef }: {
 
           if (data.data && data.data[0] && data.data[0].url) {
             const originalUrl = data.data[0].url;
-            const imageId = await saveImageBlob(originalUrl, pendingId);
-            const urls = await loadImageBlobUrls([imageId]);
-            setImageUrls(prev => ({ ...prev, ...urls }));
+            receiveAndDisplayImage(originalUrl, pendingId, apiKey, setImageUrls);
             updateColumn(col.id, (prevCol) => ({
               results: prevCol.results.map(r => r.id === pendingId ? {
                 ...r,
@@ -1517,9 +1566,7 @@ export default function GenerationColumns({ onOpenSandbox, agentActionsRef }: {
               const resData = inner.data?.data?.[0];
               if (resData && resData.url) {
                 const originalUrl = resData.url;
-                const imageId = await saveImageBlob(originalUrl, pendingId);
-                const urls = await loadImageBlobUrls([imageId]);
-                setImageUrls(prev => ({ ...prev, ...urls }));
+                receiveAndDisplayImage(originalUrl, pendingId, apiKey, setImageUrls);
                 updateColumn(col.id, (prevCol) => ({
                   results: prevCol.results.map(r => r.id === pendingId ? {
                     ...r,
@@ -1537,6 +1584,114 @@ export default function GenerationColumns({ onOpenSandbox, agentActionsRef }: {
             }
           }
           throw new Error('[nano-banana] Timeout (60 attempts)');
+        } else if (snapModel === 'seedream-4') {
+          const seedreamSizeMap: Record<string, string> = {
+            '1:1-1k': '1024x1024',
+            '1:1-2k': '2048x2048',
+            '1:1-4k': '2880x2880',
+            '16:9-1k': '1280x720',
+            '16:9-2k': '2560x1440',
+            '16:9-4k': '3840x2160',
+            '9:16-1k': '720x1280',
+            '9:16-2k': '1440x2560',
+            '9:16-4k': '2160x3840',
+            '4:3-1k': '1152x864',
+            '4:3-2k': '2048x1536',
+            '4:3-4k': '2880x2160',
+            '3:4-1k': '864x1152',
+            '3:4-2k': '1536x2048',
+            '3:4-4k': '2160x2880',
+            '2:3-1k': '800x1200',
+            '2:3-2k': '1365x2048',
+            '2:3-4k': '1920x2880',
+            '3:2-1k': '1200x800',
+            '3:2-2k': '2048x1365',
+            '3:2-4k': '2880x1920',
+            '4:5-1k': '960x1200',
+            '4:5-2k': '1638x2048',
+            '4:5-4k': '2304x2880',
+            '5:4-1k': '1200x960',
+            '5:4-2k': '2048x1638',
+            '5:4-4k': '2880x2304',
+            '21:9-1k': '2048x878',
+            '21:9-2k': '3440x1440',
+            '21:9-4k': '5120x2160',
+          };
+          const seedreamSize = seedreamSizeMap[`${snapAspectRatio}-${snapResolution}`] || '2048x2048';
+          const payload: any = {
+            model: 'doubao-seedream-4-0-250828',
+            prompt: snapPrompt,
+            n: 1,
+            response_format: 'url',
+            size: seedreamSize,
+            stream: false,
+            watermark: false,
+          };
+
+          if (col.refImages.length > 0) {
+            addLog(col.id, `[即梦4] Loading ${col.refImages.length} reference image(s)...`);
+            const imageUrls: string[] = [];
+            for (let i = 0; i < col.refImages.length; i++) {
+              let imgUrl = col.refImages[i];
+              if (imgUrl.startsWith('/api/proxy-image?url=')) {
+                imgUrl = decodeURIComponent(imgUrl.replace('/api/proxy-image?url=', ''));
+              } else if (imgUrl.startsWith('/api/t8star/')) {
+                imgUrl = imgUrl.replace('/api/t8star/', 'https://ai.t8star.org/');
+              }
+              imageUrls.push(imgUrl);
+            }
+            payload.image = imageUrls;
+          }
+
+          addLog(col.id, '[即梦4] Sending POST /v1/images/generations...');
+          addLog(col.id, `[即梦4] Payload: ${JSON.stringify(payload).substring(0, 500)}`);
+          const res = await fetch('/api/t8star/v1/images/generations', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${apiKey}`,
+            },
+            body: JSON.stringify(payload),
+            signal,
+          });
+
+          const text = await res.text();
+          addLog(col.id, `[即梦4] Response status: ${res.status}`);
+          addLog(col.id, `[即梦4] Response content: ${text.substring(0, 500)}`);
+          let data;
+          try {
+            data = JSON.parse(text);
+          } catch (e) {
+            addLog(col.id, `[即梦4] JSON parse error: ${(e as Error).message}`);
+            throw new Error(`[即梦4] Invalid JSON response: ${text.substring(0, 200)}`);
+          }
+
+          if (!res.ok) {
+            throw new Error(`[即梦4] API Error: ${data.message || data.error?.message || res.statusText}`);
+          }
+
+          if (data.data && data.data.length > 0) {
+            const urls = data.data.map((item: any) => item.url).filter((url: string) => url);
+            if (urls.length > 0) {
+              const firstUrl = urls[0];
+              receiveAndDisplayImage(firstUrl, pendingId, apiKey, setImageUrls);
+              updateColumn(col.id, (prevCol) => ({
+                results: prevCol.results.map(r => r.id === pendingId ? {
+                  ...r,
+                  timestamp: Date.now(),
+                  duration: Math.round((Date.now() - startTime) / 1000),
+                  imageUrl: firstUrl,
+                } : r),
+              }));
+              if (urls.length > 1) {
+                addLog(col.id, `[即梦4] Generated ${urls.length} images`);
+              }
+            } else {
+              throw new Error('[即梦4] No image URLs in response');
+            }
+          } else {
+            throw new Error('[即梦4] Unexpected response structure');
+          }
         } else if (snapModel === 'gpt-image-2-2in1') {
           // 2in1 竞速：同时跑 gpt-image-2 (A) 和 gpt-image-2-all (B)，先到先用，
           // 赢者 abort 输者（停止轮询即可），两个都失败才算失败
@@ -1579,67 +1734,23 @@ export default function GenerationColumns({ onOpenSandbox, agentActionsRef }: {
             if (blob) imageBlobs.push({ blob, name: 'image_0.png' });
           }
 
-          // 单模型生图：提交任务 + 轮询，返回原始图片 URL
+          // 单模型生图：使用共享服务（Zhenzhen Live Test 同款流程）
           const runSingle = async (modelName: string, signal: AbortSignal, tag: string): Promise<string> => {
-            const formData = new FormData();
-            formData.append('prompt', snapPrompt);
-            formData.append('model', modelName);
-            formData.append('n', '1');
-            formData.append('quality', col.quality);
-            formData.append('size', sizeStr);
-            imageBlobs.forEach(item => formData.append('image', item.blob, item.name));
-
-            addLog(col.id, `[${tag}] POST /v1/images/edits?async=true (model: ${modelName})...`);
-            const res = await fetch('/api/t8star/v1/images/edits?async=true', {
-              method: 'POST',
-              headers: { Authorization: `Bearer ${apiKey}` },
-              body: formData,
-              signal,
-            });
-            const text = await res.text();
-            let data;
-            try {
-              data = JSON.parse(text);
-            } catch {
-              throw new Error(`[${tag}] Invalid JSON response`);
-            }
-            if (!res.ok) {
-              throw new Error(`[${tag}] API Error: ${data.message || data.error?.message || res.statusText}`);
-            }
-            const taskId = data.task_id || data.data;
-            if (!taskId) throw new Error(`[${tag}] No task ID`);
-            addLog(col.id, `[${tag}] Task: ${taskId}`);
-
-            let attempts = 0;
-            while (attempts < 60) {
-              if (signal.aborted) throw new DOMException(`[${tag}] Aborted`, 'AbortError');
-              attempts++;
-              await new Promise(r => setTimeout(r, 5000));
-              if (signal.aborted) throw new DOMException(`[${tag}] Aborted`, 'AbortError');
-              addLog(col.id, `[${tag}] Polling ${attempts}...`);
-              const statusRes = await fetch(`/api/t8star/v1/images/tasks/${taskId}`, {
-                headers: { Authorization: `Bearer ${apiKey}` },
+            return runAsyncImageGeneration(
+              {
+                apiKey,
+                prompt: snapPrompt,
+                model: modelName,
+                quality: col.quality,
+                sizeStr,
+                imageBlobs,
                 signal,
-              });
-              const statusText = await statusRes.text();
-              let statusData;
-              try {
-                statusData = JSON.parse(statusText);
-              } catch {
-                continue;
+                tag,
+              },
+              {
+                onLog: (msg) => addLog(col.id, msg),
               }
-              const inner = statusData.data || {};
-              const state = inner.status;
-              addLog(col.id, `[${tag}] Status: ${state}`);
-              if (state === 'SUCCESS') {
-                const resData = inner.data?.data?.[0];
-                if (resData && resData.url) return resData.url;
-                throw new Error(`[${tag}] Unexpected response structure`);
-              } else if (state === 'FAILURE') {
-                throw new Error(`[${tag}] Failed: ${inner.fail_reason}`);
-              }
-            }
-            throw new Error(`[${tag}] Timeout (60 attempts)`);
+            );
           };
 
           // 包一层日志：单个失败/取消时记录，不立即中断（Promise.any 继续等另一个）
@@ -1665,9 +1776,7 @@ export default function GenerationColumns({ onOpenSandbox, agentActionsRef }: {
             abortController.abort(); // 取消输者
             addLog(col.id, '[2in1] Winner resolved. Saving image...');
 
-            const imageId = await saveImageBlob(winnerUrl, pendingId);
-            const urls = await loadImageBlobUrls([imageId]);
-            setImageUrls(prev => ({ ...prev, ...urls }));
+            receiveAndDisplayImage(winnerUrl, pendingId, apiKey, setImageUrls);
             updateColumn(col.id, (prevCol) => ({
               results: prevCol.results.map(r => r.id === pendingId ? {
                 ...r,
@@ -1712,94 +1821,36 @@ export default function GenerationColumns({ onOpenSandbox, agentActionsRef }: {
           }
 
           if (imageBlobs.length === 0) {
-            const canvas = document.createElement('canvas');
-            canvas.width = targetW;
-            canvas.height = targetH;
-            const ctx = canvas.getContext('2d');
-            if (ctx) {
-              ctx.fillStyle = 'white';
-              ctx.fillRect(0, 0, targetW, targetH);
-            }
-            const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/png'));
-            if (blob) imageBlobs.push({ blob, name: 'image_0.png' });
+            const blob = await generateWhiteImageBlob(targetW, targetH);
+            imageBlobs.push({ blob, name: 'image_0.png' });
           }
 
-          const formData = new FormData();
-          formData.append('prompt', snapPrompt);
-          formData.append('model', snapModel);
-          formData.append('n', '1');
-          formData.append('quality', col.quality);
-          formData.append('size', sizeStr);
-          imageBlobs.forEach(item => formData.append('image', item.blob, item.name));
-
-          addLog(col.id, 'Sending POST /v1/images/edits?async=true...');
-          const res = await fetch('/api/t8star/v1/images/edits?async=true', {
-            method: 'POST',
-            headers: { Authorization: `Bearer ${apiKey}` },
-            body: formData,
-            signal,
-          });
-
-          const text = await res.text();
-          let data;
-          try {
-            data = JSON.parse(text);
-          } catch {
-            throw new Error('Invalid JSON response');
-          }
-
-          if (!res.ok) {
-            throw new Error(`API Error: ${data.message || data.error?.message || res.statusText}`);
-          }
-
-          const taskId = data.task_id || data.data;
-          if (!taskId) throw new Error('No task ID');
-          addLog(col.id, `Task: ${taskId}`);
-
-          let attempts = 0;
-          while (attempts < 60) {
-            if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
-            attempts++;
-            await new Promise(r => setTimeout(r, 5000));
-            if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
-            addLog(col.id, `Polling ${attempts}...`);
-
-            const statusRes = await fetch(`/api/t8star/v1/images/tasks/${taskId}`, {
-              headers: { Authorization: `Bearer ${apiKey}` },
+          // 使用共享服务（Zhenzhen Live Test 同款流程）
+          const originalUrl = await runAsyncImageGeneration(
+            {
+              apiKey,
+              prompt: snapPrompt,
+              model: snapModel,
+              quality: col.quality,
+              sizeStr,
+              imageBlobs,
               signal,
-            });
-            const statusText = await statusRes.text();
-            let statusData;
-            try {
-              statusData = JSON.parse(statusText);
-            } catch {
-              continue;
+            },
+            {
+              onLog: (msg) => addLog(col.id, msg),
             }
-            const inner = statusData.data || {};
-            const state = inner.status;
-            addLog(col.id, `Status: ${state}`);
+          );
 
-            if (state === 'SUCCESS') {
-              const resData = inner.data?.data?.[0];
-              if (resData && resData.url) {
-                const originalUrl = resData.url;
-                const imageId = await saveImageBlob(originalUrl, pendingId);
-                const urls = await loadImageBlobUrls([imageId]);
-                setImageUrls(prev => ({ ...prev, ...urls }));
-                updateColumn(col.id, (prevCol) => ({
-                  results: prevCol.results.map(r => r.id === pendingId ? {
-                    ...r,
-                    timestamp: Date.now(),
-                    duration: Math.round((Date.now() - startTime) / 1000),
-                    imageUrl: originalUrl,
-                  } : r),
-                }));
-              }
-              break;
-            } else if (state === 'FAILURE') {
-              throw new Error(`Failed: ${inner.fail_reason}`);
-            }
-          }
+          addLog(col.id, 'Saving image...');
+          receiveAndDisplayImage(originalUrl, pendingId, apiKey, setImageUrls);
+          updateColumn(col.id, (prevCol) => ({
+            results: prevCol.results.map(r => r.id === pendingId ? {
+              ...r,
+              timestamp: Date.now(),
+              duration: Math.round((Date.now() - startTime) / 1000),
+              imageUrl: originalUrl,
+            } : r),
+          }));
         }
       } catch (err: any) {
         if (err.name === 'AbortError') {
@@ -1925,6 +1976,7 @@ export default function GenerationColumns({ onOpenSandbox, agentActionsRef }: {
               <span className="font-['Inter'] font-semibold">{apiStatus === 'online' ? '接口正常' : apiStatus === 'offline' ? '接口断开' : '检测中...'}</span>
             </div>
             <button onClick={onOpenSandbox} className="flex items-center space-x-1.5 px-3 py-1.5 bg-[#f0f0f2] hover:bg-[#e5e5e7] rounded-lg text-[11px] text-[#86868b] transition-colors"><Code2 className="w-3.5 h-3.5" /><span className="leading-none font-['Inter'] font-semibold">接口</span></button>
+            <button onClick={onOpenAnyApi} className="flex items-center space-x-1.5 px-3 py-1.5 bg-[#f0f0f2] hover:bg-[#e5e5e7] rounded-lg text-[11px] text-[#86868b] transition-colors"><Code2 className="w-3.5 h-3.5" /><span className="leading-none font-['Inter'] font-semibold">Any接口</span></button>
             <button onClick={() => setShowAgentPromptEditor(true)} className="flex items-center space-x-1.5 px-3 py-1.5 bg-[#f0f0f2] hover:bg-[#e5e5e7] rounded-lg text-[11px] text-[#86868b] transition-colors"><Bug className="w-3.5 h-3.5" /><span className="leading-none font-['Inter'] font-semibold">调试</span></button>
             <button onClick={() => setShowAgentLog(true)} className="flex items-center space-x-1.5 px-3 py-1.5 bg-[#f0f0f2] hover:bg-[#e5e5e7] rounded-lg text-[11px] text-[#86868b] transition-colors"><ScrollText className="w-3.5 h-3.5" /><span className="leading-none font-['Inter'] font-semibold">日志</span></button>
             <button onClick={() => setShowAgentSettings(true)} className="flex items-center space-x-1.5 px-3 py-1.5 bg-[#f0f0f2] hover:bg-[#e5e5e7] rounded-lg text-[11px] text-[#86868b] transition-colors"><Settings className="w-3.5 h-3.5" /><span className="leading-none font-['Inter'] font-semibold">设置</span></button>
@@ -3328,7 +3380,7 @@ function ColumnCard({
               </div>
 
               {/* Image Area — 按状态切换 */}
-              <div className={`overflow-hidden relative group ${isSuccess ? 'cursor-pointer' : 'cursor-default'}`}>
+              <div className={`overflow-hidden relative group ${isSuccess && imageUrls[imgId] ? 'cursor-pointer' : 'cursor-default'}`}>
                 {isGenerating ? (
                   <>
                     <div className="w-full bg-gradient-to-b from-[#e2e8f0] via-[#f1f5f9] to-[#e2e8f0] animate-pulse relative overflow-hidden" style={{ aspectRatio: ratio }}>
@@ -3348,6 +3400,16 @@ function ColumnCard({
                       <span className="text-[11px] font-medium">中断</span>
                     </button>
                   </>
+                ) : isSuccess && !imageUrls[imgId] ? (
+                  /* Blob 下载中：API 已返回，正在主动 Fetch 图片到内存 */
+                  <div className="w-full bg-gradient-to-b from-[#e2e8f0] via-[#f1f5f9] to-[#e2e8f0] animate-pulse relative overflow-hidden" style={{ aspectRatio: ratio }}>
+                    <div className="absolute inset-0 bg-gradient-to-r from-transparent via-[#4f39f6]/10 to-transparent animate-shimmer" />
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <span className="px-3 py-1.5 rounded-full bg-black/10 text-[#4f39f6] text-[12px] font-semibold font-['Inter'] backdrop-blur-sm">
+                        接收中...
+                      </span>
+                    </div>
+                  </div>
                 ) : isError ? (
                     <div className="relative bg-[#fff1f2] flex flex-col items-center justify-center p-6" style={{ aspectRatio: ratio }}>
                       <div className="flex items-center gap-1.5 text-[#ff3b30] text-[12px] font-semibold mb-3 font-['Inter']">
@@ -3372,6 +3434,7 @@ function ColumnCard({
                       src={displayUrl}
                       alt="result"
                       data-agent-image-url={item.imageUrl || ''}
+                      style={{ aspectRatio: String(ratio) }}
                       className="w-full h-auto object-contain transition-transform duration-300 group-hover:scale-[1.05] clickable-image"
                       onClick={() => setIsFullscreen(displayUrl)}
                     />

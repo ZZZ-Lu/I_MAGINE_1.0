@@ -1,6 +1,7 @@
 import React, { useState, useCallback, useRef, useMemo } from 'react';
 import GenerationColumns from './components/GenerationColumns';
 import Playground from './components/Playground';
+import AnyApiTest from './components/AnyApiTest';
 import FloatingAgentInput from './components/FloatingAgentInput';
 import { AgentActionsProvider, ColumnInfo } from './services/AgentContext';
 
@@ -27,7 +28,7 @@ class ErrorBoundary extends React.Component<
 }
 
 export default function App() {
-  const [page, setPage] = useState<'home' | 'sandbox'>('home');
+  const [page, setPage] = useState<'home' | 'sandbox' | 'anyapi'>('home');
   const pageRef = useRef(page);
   pageRef.current = page;
 
@@ -91,7 +92,7 @@ export default function App() {
     updateColumn: (id: string, patch: Record<string, unknown>) => genColumnsRef.current.updateColumn(id, patch),
     generateImage: (id: string) => genColumnsRef.current.generateImage(id),
     getPage: () => pageRef.current,
-    setPage: (p: 'home' | 'sandbox') => setPage(p),
+    setPage: (p: 'home' | 'sandbox' | 'anyapi') => setPage(p),
     deleteImage: (colId: string, imageIndex: number) => genColumnsRef.current.deleteImage(colId, imageIndex),
     toggleFavorite: (colId: string, imageIndex: number) => genColumnsRef.current.toggleFavorite(colId, imageIndex),
     abortGenerate: (colId: string) => genColumnsRef.current.abortGenerate(colId),
@@ -118,9 +119,12 @@ export default function App() {
     <AgentActionsProvider actions={agentActions}>
       {page === 'sandbox' ? (
         <Playground onBack={() => setPage('home')} />
+      ) : page === 'anyapi' ? (
+        <AnyApiTest onBack={() => setPage('home')} />
       ) : (
         <GenerationColumns
           onOpenSandbox={() => setPage('sandbox')}
+          onOpenAnyApi={() => setPage('anyapi')}
           agentActionsRef={genColumnsRef}
         />
       )}

@@ -153,8 +153,8 @@ export const AGENT_TOOLS: AgentToolParam[] = [
           },
           model: {
             type: 'string',
-            description: '模型名称，可选: gpt-image-2-2in1, gpt-image-2, gpt-image-2-all, nano-banana-2, nano-banana-pro, nano-banana-hd, nano-banana-pro-2k',
-            default: 'gpt-image-2-2in1',
+            description: '模型名称，可选: nano-banana-pro, gpt-image-2-2in1, seedream-4',
+            default: 'nano-banana-pro',
           },
           aspectRatio: {
             type: 'string',
@@ -249,7 +249,7 @@ export const AGENT_TOOLS: AgentToolParam[] = [
           },
           model: {
             type: 'string',
-            description: '模型名称，可选: gpt-image-2-2in1, gpt-image-2, gpt-image-2-all, nano-banana-2, nano-banana-pro, nano-banana-hd, nano-banana-pro-2k',
+            description: '模型名称，可选: nano-banana-pro, gpt-image-2-2in1, seedream-4',
           },
         },
         required: ['columnIndex', 'model'],

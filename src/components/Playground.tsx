@@ -407,7 +407,96 @@ export default function Playground({ onBack }: { onBack?: () => void }) {
         imageBlobs.push({blob, name: 'image_0.png'});
       }
 
-      if (model.includes('nano-banana')) {
+      if (model === 'seedream-4') {
+        const seedreamSizeMap: Record<string, string> = {
+          '1:1-1k': '1024x1024',
+          '1:1-2k': '2048x2048',
+          '1:1-4k': '2880x2880',
+          '16:9-1k': '1280x720',
+          '16:9-2k': '2560x1440',
+          '16:9-4k': '3840x2160',
+          '9:16-1k': '720x1280',
+          '9:16-2k': '1440x2560',
+          '9:16-4k': '2160x3840',
+          '4:3-1k': '1152x864',
+          '4:3-2k': '2048x1536',
+          '4:3-4k': '2880x2160',
+          '3:4-1k': '864x1152',
+          '3:4-2k': '1536x2048',
+          '3:4-4k': '2160x2880',
+          '2:3-1k': '800x1200',
+          '2:3-2k': '1365x2048',
+          '2:3-4k': '1920x2880',
+          '3:2-1k': '1200x800',
+          '3:2-2k': '2048x1365',
+          '3:2-4k': '2880x1920',
+          '4:5-1k': '960x1200',
+          '4:5-2k': '1638x2048',
+          '4:5-4k': '2304x2880',
+          '5:4-1k': '1200x960',
+          '5:4-2k': '2048x1638',
+          '5:4-4k': '2880x2304',
+          '21:9-1k': '2048x878',
+          '21:9-2k': '3440x1440',
+          '21:9-4k': '5120x2160',
+        };
+        const seedreamSize = seedreamSizeMap[`${aspectRatio}-${resolution}`] || '2048x2048';
+        const payload: any = {
+          model: 'doubao-seedream-4-0-250828',
+          prompt: prompt,
+          n: 1,
+          response_format: 'url',
+          size: seedreamSize,
+          stream: false,
+          watermark: false,
+        };
+
+        if (refImagePreviews.length > 0) {
+          payload.image = refImagePreviews;
+        }
+
+        addLog(`[即梦4] Sending POST /v1/images/generations...`);
+
+        const res = await fetch('/api/t8star/v1/images/generations', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`
+          },
+          body: JSON.stringify(payload)
+        });
+
+        const text = await res.text();
+        let data;
+        try {
+          data = JSON.parse(text);
+        } catch (e) {
+          throw new Error(`Invalid JSON response: ${text.substring(0, 100)}`);
+        }
+
+        addLog(`Response Status: ${res.status}`);
+        addLog(`Response: ${JSON.stringify(data).substring(0, 200)}...`);
+
+        if (!res.ok) {
+          throw new Error(`API Error: ${data.message || data.error?.message || res.statusText}`);
+        }
+
+        if (data.data && data.data.length > 0 && data.data[0].url) {
+          const resUrl = data.data[0].url;
+          setResultImg(resUrl);
+          addLog(`Final URL: ${resUrl}`);
+
+          if (lingerEnabled) {
+            addLog('灵儿 is naming...');
+          }
+          const item = buildHistoryItem(Date.now().toString(), resUrl, prompt);
+          setResultName(item.name ?? null);
+          if (item.name) addLog(`灵儿 named: ${item.name}`);
+          setHistory(prev => [item, ...prev].slice(0, 50));
+        } else {
+          throw new Error(`Unexpected Data structure: ${JSON.stringify(data)}`);
+        }
+      } else if (model.includes('nano-banana')) {
         const payload: any = {
           model: model,
           prompt: prompt,
@@ -769,11 +858,12 @@ export default function Playground({ onBack }: { onBack?: () => void }) {
             <div className="space-y-1.5">
               <span className="text-[10px] font-mono text-zinc-500 uppercase">Model</span>
               <select value={model} onChange={(e) => setModel(e.target.value)} className="w-full bg-zinc-950 border border-zinc-800 p-2.5 rounded-lg text-xs font-mono">
-                <option value="gpt-image-2">gpt-image-2</option>
-                <option value="gpt-image-2-all">gpt-image-2-all</option>
                 <option value="nano-banana-pro">nano-banana-pro</option>
                 <option value="nano-banana-hd">nano-banana-hd</option>
                 <option value="nano-banana-pro-2k">nano-banana-pro-2k</option>
+                <option value="seedream-4">即梦4</option>
+                <option value="gpt-image-2">gpt-image-2</option>
+                <option value="gpt-image-2-all">gpt-image-2-all</option>
               </select>
             </div>
             <div className="space-y-1.5">

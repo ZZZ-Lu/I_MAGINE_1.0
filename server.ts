@@ -4,7 +4,7 @@ import { createServer as createViteServer } from "vite";
 
 const TARGET_BASE = "https://ai.t8star.org";
 const ANTHROPIC_BASE = "https://dashscope.aliyuncs.com/apps/anthropic";
-
+const ANY_API_BASE = "https://ai.t8star.org";
 const __dirname = process.cwd();
 
 async function startServer() {
@@ -16,9 +16,6 @@ async function startServer() {
     const targetPath = req.originalUrl.replace("/api/t8star", "");
     const targetUrl = `${TARGET_BASE}${targetPath}`;
 
-    // Build headers to forward
-    // Note: do NOT forward content-length; Node fetch (Undici) computes it automatically
-    // and rejects manually-set content-length with UND_ERR_INVALID_ARG.
     const forwardHeaders: Record<string, string> = {};
     const allowList = [
       "authorization",
@@ -33,18 +30,17 @@ async function startServer() {
         forwardHeaders[key] = Array.isArray(val) ? val.join(", ") : val;
       }
     }
-    // Host is automatically set by fetch() from the URL hostname
 
     try {
-      // Collect raw body
       const chunks: Buffer[] = [];
       for await (const chunk of req) {
         chunks.push(chunk);
       }
-      const body = chunks.length > 0 ? Buffer.concat(chunks) : undefined;
+      let body = chunks.length > 0 ? Buffer.concat(chunks) : undefined;
 
       console.log(`[Proxy] ${req.method} ${targetUrl}`);
       console.log(`[Proxy] Headers:`, JSON.stringify(forwardHeaders));
+      
       if (body) {
         console.log(`[Proxy] Body size: ${body.length} bytes`);
         if (forwardHeaders['content-type']?.includes('application/json')) {
@@ -73,6 +69,75 @@ async function startServer() {
       res.send(resBody);
     } catch (err: any) {
       console.error("[Proxy Error]", err.message);
+      res.status(502).json({ error: "Proxy error", message: err.message });
+    }
+  });
+
+  // Proxy for Any API (anyaigc.com)
+  app.all("/api/any/*", async (req, res) => {
+    const targetPath = req.originalUrl.replace("/api/any", "");
+    const targetUrl = `${ANY_API_BASE}${targetPath}`;
+
+    const forwardHeaders: Record<string, string> = {};
+    const allowList = [
+      "authorization",
+      "content-type",
+      "accept",
+      "accept-encoding",
+      "accept-language",
+    ];
+    for (const key of allowList) {
+      const val = req.headers[key];
+      if (val) {
+        forwardHeaders[key] = Array.isArray(val) ? val.join(", ") : val;
+      }
+    }
+
+    try {
+      const chunks: Buffer[] = [];
+      for await (const chunk of req) {
+        chunks.push(chunk);
+      }
+      const body = chunks.length > 0 ? Buffer.concat(chunks) : undefined;
+
+      console.log(`[Any Proxy] ${req.method} ${targetUrl}`);
+      console.log(`[Any Proxy] Headers:`, JSON.stringify(forwardHeaders));
+      if (body) {
+        console.log(`[Any Proxy] Body size: ${body.length} bytes`);
+        if (forwardHeaders['content-type']?.includes('application/json')) {
+          console.log(`[Any Proxy] Body:`, body.toString('utf-8'));
+        }
+      }
+
+      const fetchRes = await fetch(targetUrl, {
+        method: req.method || "GET",
+        headers: forwardHeaders,
+        body: body as any,
+      });
+
+      console.log(`[Any Proxy] Response status: ${fetchRes.status}`);
+
+      res.status(fetchRes.status);
+      fetchRes.headers.forEach((value, key) => {
+        if (["transfer-encoding", "connection", "keep-alive"].includes(key)) return;
+        res.setHeader(key, value);
+      });
+
+      if (fetchRes.body) {
+        const reader = fetchRes.body.getReader();
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          res.write(value);
+        }
+        res.end();
+      } else {
+        const resBody = await fetchRes.text();
+        console.log(`[Any Proxy] Response body:`, resBody.length > 500 ? resBody.substring(0, 500) + '...' : resBody);
+        res.send(resBody);
+      }
+    } catch (err: any) {
+      console.error("[Any Proxy Error]", err.message);
       res.status(502).json({ error: "Proxy error", message: err.message });
     }
   });
