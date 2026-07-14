@@ -598,8 +598,8 @@ export default function GenerationColumns({ onOpenSandbox, onOpenAnyApi, agentAc
   const [apiKey, setApiKey] = useState(() => {
     const stored = localStorage.getItem('Playground_apiKey');
     if (stored) return stored;
-    if (isProd) { localStorage.setItem('Playground_apiKey', DEFAULT_KEYS.playground); return DEFAULT_KEYS.playground; }
-    return '';
+    localStorage.setItem('Playground_apiKey', DEFAULT_KEYS.playground);
+    return DEFAULT_KEYS.playground;
   });
   const [toastMsg, setToastMsg] = useState<string | null>(null);
   const [showNewProjectModal, setShowNewProjectModal] = useState(false);
@@ -631,14 +631,14 @@ export default function GenerationColumns({ onOpenSandbox, onOpenAnyApi, agentAc
   const [agentApiKey, setAgentApiKey] = useState(() => {
     const stored = localStorage.getItem('agent_qwen_api_key');
     if (stored) return stored;
-    if (isProd) { localStorage.setItem('agent_qwen_api_key', DEFAULT_KEYS.agent); return DEFAULT_KEYS.agent; }
-    return '';
+    localStorage.setItem('agent_qwen_api_key', DEFAULT_KEYS.agent);
+    return DEFAULT_KEYS.agent;
   });
   const [bochaApiKey, setBochaApiKey] = useState(() => {
     const stored = localStorage.getItem('bocha_api_key');
     if (stored) return stored;
-    if (isProd) { localStorage.setItem('bocha_api_key', DEFAULT_KEYS.bocha); return DEFAULT_KEYS.bocha; }
-    return '';
+    localStorage.setItem('bocha_api_key', DEFAULT_KEYS.bocha);
+    return DEFAULT_KEYS.bocha;
   });
   const [pageReady, setPageReady] = useState(false);
   const [referenceGallery, setReferenceGallery] = useState<{ url: string; name: string; origin?: string }[]>([]);
