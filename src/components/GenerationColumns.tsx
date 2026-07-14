@@ -3437,6 +3437,12 @@ function ColumnCard({
                       style={{ aspectRatio: String(ratio) }}
                       className="w-full h-auto object-contain transition-transform duration-300 group-hover:scale-[1.05] clickable-image"
                       onClick={() => setIsFullscreen(displayUrl)}
+                      draggable="true"
+                      onDragStart={(e) => {
+                        const cdnUrl = item.imageUrl || displayUrl;
+                        e.dataTransfer.setData('text/uri-list', cdnUrl);
+                        e.dataTransfer.setData('text/plain', cdnUrl);
+                      }}
                     />
                     {isDownloaded && (
                       <div className="absolute top-2 left-2 z-10 text-[#248a3d] px-1.5 py-0.5 rounded text-[10px] font-medium flex items-center gap-0.5">
